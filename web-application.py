@@ -181,7 +181,7 @@ def main():
     #For the page display, create headers and subheader, and get an input address from the user
     st.header("VST CP selectie (beta-version)")
     st.text("")
-    st.subheader("CP selecteren op basis van Last Known Position (LKKP)")
+    st.subheader("CP selecteren op basis van Last Known Position (LKP)")
     st.text("")
     address = st.text_input("Adres van LKP?", "Hobbemalaan 5, 3712 AZ Huis Ter Heide")
     # Use the convert_address function to convert address to coordinates
