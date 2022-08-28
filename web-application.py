@@ -1,12 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-Spyder Editor
 
-This is a temporary script file.
 """
 from geopy.geocoders import Nominatim
+import re
 import streamlit as st
-from datetime import datetime
 import requests
 from urllib.parse import quote
 import geopandas as gpd
@@ -18,33 +16,27 @@ import folium
 
 def convert_address(address):
     #Here we use Nominatin to convert address to a latitude/longitude coordinates"
-    geolocator = Nominatim(user_agent="CP_sellection") #using open street map API 
+    geolocator = Nominatim(user_agent="CP_sellection",
+                           timeout=250) #using open street map API 
     Geo_Coordinate = geolocator.geocode(address)
     lat = Geo_Coordinate.latitude
     long = Geo_Coordinate.longitude
     return lat, long
 
 
-# def calculate_hours(time):
-#     """
-#     Calculate hours between LKP reported and
-#     current time.
+def match_lat_long_input(string):
+    """
+    Function to check if string input follows lat long format.
+    Input is checked with regex.
     
-#     Hours are rounded.
-#     """
-#     # start time
-#     start_time = f"{time}:00"
-#     end_time = datetime.now().strftime("%H:%M:%S")
-
-#     # convert time string to datetime
-#     t1 = datetime.strptime(start_time, "%H:%M:%S")
-#     t2 = datetime.strptime(end_time, "%H:%M:%S")
-#     # get difference
-#     delta = t2 - t1
-#     hours = round(delta.seconds / 3600)
-#     return hours
-
-
+    """
+    latlong = re.compile(r"^[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?),\s*[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?)$")
+    if re.match(latlong, string):
+        return True
+    else:
+        return False
+    
+    
 def calculate_half_isodistance(hours, speed):
     """
     Calculates half of the distance the missing person
@@ -128,15 +120,18 @@ def get_parking(bbox, max_parking=20):
 
 def display_map(lkp_dic, isodistance_result_object, largest_parkings):
     """
-    Using folium wrapper for leaflet.js to generate html to visualize
-    result on interactive map.
+    Using folium wrapper for leaflet.js to generate map to visualize
+    result on a interactive map.
     """
-    m = folium.Map(location=(lkp_dic["lat"],lkp_dic["long"]),tiles='CartoDB positron')
-    # Add LKP as marker to map
-    folium.Marker(
+    m = folium.Map( # create map object
+                    location=(lkp_dic["lat"],lkp_dic["long"]),
+                    tiles='CartoDB positron'
+                    )
+    
+    folium.Marker(# Add LKP as marker to map
         location=[lkp_dic["lat"], lkp_dic["long"]],
         popup="Laatst bekende locatie.",
-        icon=folium.Icon(color="red", icon="info-sign"),
+        icon=folium.Icon(color="red", prefix="fa", icon="fa-male"),
     ).add_to(m)
     # Add the isodistances to map
     folium.GeoJson(
@@ -151,58 +146,83 @@ def display_map(lkp_dic, isodistance_result_object, largest_parkings):
     # Add all the largest parkings to map
     for _, r in largest_parkings.iterrows():
         sim_geo = gpd.GeoSeries(r['geometry'])
-        geo_j = sim_geo.to_json()
-        geo_j = folium.GeoJson(data=geo_j,
+        geo_j = sim_geo.to_json() # convert shapely geometry to geojson
+        geo_j = folium.GeoJson(# add parking polygons to the map
+                               data=geo_j,
                                style_function=lambda x: {'fillColor': 'blue',
                                                         'color':'black',
                                                         'fillOpacity': 0.6,
-                                                        'weight':0.5})
+                                                        'weight':0.5}
+                               )
+        
+        geo_j.add_to(m)
+        icon_url = r"https://upload.wikimedia.org/wikipedia/commons/8/84/Parking_lot_symbol_FLC.svg"
+        icon = folium.features.CustomIcon(icon_url, icon_size=(24, 24))
+        
+        parking = folium.Marker(# add a marker to the center of the parkinglot
+                      location=[r["center"][0], r["center"][1]],
+                      popup="Parking",
+                      icon=icon
+                      )
+        # Popup to add to the parking polygons
         popup = f"""
-        <a href=https://www.google.com/search?q={str(r["center"][0])}%2C+{str(r["center"][1])}>Google search location</a><br>
+        <a href=https://www.google.com/search?q={str(r["center"][0])}%2C+{str(r["center"][1])} target="_blank" rel="noopener noreferrer">Google search location</a><br>
         <strong>Oppervlakte:</strong> {r["area"]}
         """
         counter +=1
-        folium.Popup(popup, max_width=350, min_width=350).add_to(geo_j)
-        geo_j.add_to(m)
+        folium.Popup(popup, max_width=350, min_width=50).add_to(parking)
+        parking.add_to(m)
 
     m.fit_bounds(m.get_bounds(),padding=(-150,-150))
     return st.markdown(m._repr_html_(), unsafe_allow_html=True)
 
 
 def main():
+    # html code to hide default buttons and footer from streamlit
     hide_streamlit_style = """
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     </style>
-    
     """
-    st.markdown(hide_streamlit_style, unsafe_allow_html=True) 
-    #For the page display, create headers and subheader, and get an input address from the user
-    st.header("VST CP selectie (beta-version)")
+    st.markdown(hide_streamlit_style, unsafe_allow_html=True)  
+    #for the page display, create headers and subheader, and get an input address from the user
+    st.header("VST CP selectie (bèta-versie)")
     st.text("")
     st.subheader("CP selecteren op basis van Last Known Position (LKP)")
     st.text("")
-    address = st.text_input("Adres van LKP?", "Hobbemalaan 5, 3712 AZ Huis Ter Heide")
-    # Use the convert_address function to convert address to coordinates
-    lat, long = convert_address(address)
+    address = st.text_input("Adres of coordinaat (lat, long) van de LKP?", 
+                            value="Hobbemalaan 5, 3712 AZ Huis Ter Heide",
+                            help="Use decimal degree for lat long input."
+                           )
+    # to check if a lat long coordinate is used as input
+    if match_lat_long_input(address):
+        lat = float(address.split(",")[0].strip())
+        long = float(address.split(",")[1].strip())
+    else:
+        # use the convert_address function to convert address to coordinates
+        lat, long = convert_address(address)
+    # get user input of hours since person was at LKP
     hours = int(st.slider('Aantal uren vermist vanaf LKP?', 
                           min_value=0, 
                           max_value=10,
                           value=3,
                           step=1
                           ))
+    # get user input for the estimate speed the missed person traveles by foot
     speed = float(st.slider('Inschatting verplaatsing snelheid te voet km/h',
                             min_value=0.0, 
                             max_value=6.0,
                             value=5.0,
                             step=0.5
                             ))
-    
+    # get the half distance of the maximum distance the missed person could have
+    # covered
     half_distance = calculate_half_isodistance(hours, speed)
+    # ranges are set to the distance the missing person could travel per half hour
     ranges = list(range(0,half_distance,round(speed*.5*1000)))
     
-    lkp_dic ={
+    lkp_dic ={ # store the input in dictionary
               "lat":lat,
               "long":long,
               "distance":half_distance,
@@ -210,10 +230,12 @@ def main():
               "speed":speed,
               "ranges":ranges
               }
-    
+    # get the isodistances by using lkp_dic
     isodistance_result = create_isodistance(lkp_dic)
+    # get the bounding box in the correct format for overpass query
     bbox = get_bbox(isodistance_result)
-    largest_parkings = get_parking(bbox, max_parking=10)
+    # query overpass for parking locations
+    largest_parkings = get_parking(bbox)
     #Call the display_map function by passing coordinates, dataframe and geoJSON file    
     st.text("")
     display_map(lkp_dic, isodistance_result, largest_parkings)
