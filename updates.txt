@@ -1,6 +1,7 @@
 Updates to do:
 - Error handling;
-- Export parkeerplaats suggesties;
 
 Updates done:
-- Naast adres ook coordinaten toe kunnen voegen;
+- Naast adres ook coordinaten toe kunnen voegen; --> Regex match lat long input
+- Export parkeerplaats suggesties; --> download knop als json toegevoegd
+
