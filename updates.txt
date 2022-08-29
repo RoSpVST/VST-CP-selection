@@ -1,4 +1,6 @@
-Updates:
+Updates to do:
 - Error handling;
-- Naast adres ook coordinaten toe kunnen voegen;
 - Export parkeerplaats suggesties;
+
+Updates done:
+- Naast adres ook coordinaten toe kunnen voegen;

@@ -30,11 +30,11 @@ def match_lat_long_input(string):
     Input is checked with regex.
     
     """
-    latlong = re.compile(r"^[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?),\s*[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?)$")
+    pattern = r"^[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?),\s*[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?)$"
+    latlong = re.compile(pattern)
     if re.match(latlong, string):
         return True
-    else:
-        return False
+    return False
     
     
 def calculate_half_isodistance(hours, speed):
@@ -56,15 +56,17 @@ def create_isodistance(lkp_dic):
     
     Output is the result object from Open route service API.
     """
+    key='5b3ce3597851110001cf62488238eb0d4788436aaae61d6f415dc75a'
     client = openrouteservice.Client( # set openrouteservice API client
-                                    key='5b3ce3597851110001cf62488238eb0d4788436aaae61d6f415dc75a',
+                                    key=key,
                                     timeout=200, 
                                     retry_timeout=60
                                     )
 
     # Create isodistance based on the LKP dictionary object
     isodistance_result = client.isochrones( 
-                                            locations=[(lkp_dic["long"],lkp_dic["lat"])],
+                                            locations=[(lkp_dic["long"],
+                                                        lkp_dic["lat"])],
                                             profile="foot-walking",
                                             range_type="distance",
                                             range=lkp_dic["ranges"],
@@ -117,30 +119,44 @@ def get_parking(bbox, max_parking=20):
     largest_parkings["center"] = largest_parkings["geometry"].apply(lambda _ : (_.centroid.y, _.centroid.x))
     return largest_parkings
 
+@st.cache
+def convert_to_geojson(gdf):
+    return gdf.to_json()
+
 
 def display_map(lkp_dic, isodistance_result_object, largest_parkings):
     """
     Using folium wrapper for leaflet.js to generate map to visualize
     result on a interactive map.
     """
-    m = folium.Map( # create map object
+    # create map object
+    m = folium.Map( 
                     location=(lkp_dic["lat"],lkp_dic["long"]),
-                    tiles='CartoDB positron'
+                    tiles='openstreetmap'
                     )
-    
-    folium.Marker(# Add LKP as marker to map
+   # add imagery basemap to map
+    folium.TileLayer(
+        tiles = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        attr = 'Esri',
+        name = 'Esri Satellite',
+        overlay = False,
+        control = True
+       ).add_to(m)
+    # add LKP as marker to map
+    folium.Marker(
         location=[lkp_dic["lat"], lkp_dic["long"]],
         popup="Laatst bekende locatie.",
         icon=folium.Icon(color="red", prefix="fa", icon="fa-male"),
     ).add_to(m)
-    # Add the isodistances to map
+    # add the isodistances to map
     folium.GeoJson(
                     isodistance_result_object,
-                    style_function=lambda x: {'fillColor': 'yellow',
+                    style_function=lambda x: {'fillColor':'yellow',
                                               'color':'black',
-                                              'fillOpacity': 0.03,
+                                              'fillOpacity': 0.2,
                                               'weight':1},
-                    popup="value"
+                    popup="value",
+                    control=False,
                     ).add_to(m)
     counter = 1
     # Add all the largest parkings to map
@@ -152,7 +168,8 @@ def display_map(lkp_dic, isodistance_result_object, largest_parkings):
                                style_function=lambda x: {'fillColor': 'blue',
                                                         'color':'black',
                                                         'fillOpacity': 0.6,
-                                                        'weight':0.5}
+                                                        'weight':0.5},
+                               control=False
                                )
         
         geo_j.add_to(m)
@@ -166,13 +183,13 @@ def display_map(lkp_dic, isodistance_result_object, largest_parkings):
                       )
         # Popup to add to the parking polygons
         popup = f"""
-        <a href=https://www.google.com/search?q={str(r["center"][0])}%2C+{str(r["center"][1])} target="_blank" rel="noopener noreferrer">Google search location</a><br>
+        <a href=http://maps.google.com/maps?z=12&t=m&q=loc:{str(r["center"][0])}+{str(r["center"][1])} target="_blank" rel="noopener noreferrer">Google Maps</a><br>
         <strong>Oppervlakte:</strong> {r["area"]}
         """
         counter +=1
         folium.Popup(popup, max_width=350, min_width=50).add_to(parking)
         parking.add_to(m)
-
+    folium.LayerControl().add_to(m)
     m.fit_bounds(m.get_bounds(),padding=(-150,-150))
     return st.markdown(m._repr_html_(), unsafe_allow_html=True)
 
@@ -204,14 +221,14 @@ def main():
         lat, long = convert_address(address)
     # get user input of hours since person was at LKP
     hours = int(st.slider('Aantal uren vermist vanaf LKP?', 
-                          min_value=0, 
+                          min_value=1, 
                           max_value=10,
                           value=3,
                           step=1
                           ))
     # get user input for the estimate speed the missed person traveles by foot
     speed = float(st.slider('Inschatting verplaatsing snelheid te voet km/h',
-                            min_value=0.0, 
+                            min_value=0.5, 
                             max_value=6.0,
                             value=5.0,
                             step=0.5
@@ -220,8 +237,8 @@ def main():
     # covered
     half_distance = calculate_half_isodistance(hours, speed)
     # ranges are set to the distance the missing person could travel per half hour
-    ranges = list(range(0,half_distance,round(speed*.5*1000)))
-    
+    #ranges = list(range(0,half_distance,round(speed*.5*1000)))
+    ranges = [int(half_distance)]
     lkp_dic ={ # store the input in dictionary
               "lat":lat,
               "long":long,
@@ -236,6 +253,13 @@ def main():
     bbox = get_bbox(isodistance_result)
     # query overpass for parking locations
     largest_parkings = get_parking(bbox)
+    #convert geodataframe to json
+    json = convert_to_geojson(largest_parkings)
+    st.download_button(
+                        label="Download mogelijke CP locaties als JSON",
+                        data=json,
+                        file_name='cp_selection_parking.json'
+                        )
     #Call the display_map function by passing coordinates, dataframe and geoJSON file    
     st.text("")
     display_map(lkp_dic, isodistance_result, largest_parkings)
@@ -244,3 +268,4 @@ def main():
 if __name__ == "__main__":
     main()
 
+# <a href=https://www.google.com/search?q={str(r["center"][0])}%2C+{str(r["center"][1])} target="_blank" rel="noopener noreferrer">Google search location</a><br>
