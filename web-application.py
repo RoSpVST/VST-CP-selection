@@ -13,7 +13,7 @@ import openrouteservice # wrapper for ORS api
 import overpass # wrapper for overpass api
 import folium
 
-
+@st.cache
 def convert_address(address):
     """
     Convert address as string to lat, long coordinate by using Nominatim
@@ -95,7 +95,7 @@ def get_bbox(isodistance_result_object):
     return bbox
 
 
-def get_parking(bbox, max_parking=50):
+def get_parking(bbox, max_parking=30):
     """
     Get parking=surfaces from OSM. Only parkings stored as 
     surface and as the way data type are requested.
@@ -116,16 +116,21 @@ def get_parking(bbox, max_parking=50):
     gdf["area"] = gdf.to_crs("28992").geometry.area 
     # select largest parking by using max_parking parameter
     largest_parkings = gdf.sort_values("area",ascending=False).head(max_parking)
-    if gdf['capacity'].isnull().values.any() < len(gdf['capacity']):
+    if "capacity" in gdf.columns and gdf['capacity'].isnull().values.any() < len(gdf['capacity']):
         # calculate average area per car
         average_area = int(largest_parkings["area"].mean(skipna=True)/largest_parkings["capacity"].astype(float).mean(skipna=True))
     else:
         average_area = 30
-    # if capacity is NaN the capcity  will be calculated with average area per vehicle
-    largest_parkings["capacity"] = largest_parkings["capacity"].fillna(largest_parkings["area"]/average_area)
-    largest_parkings["capacity"] = largest_parkings["capacity"].astype(int)
-    # set NaN values in access attribute to unknown
-    largest_parkings["access"] = largest_parkings["access"].fillna("onbekend")
+    if "capacity" in gdf.columns:
+        # if capacity is NaN the capcity  will be calculated with average area per vehicle
+        largest_parkings["capacity"] = largest_parkings["capacity"].fillna(largest_parkings["area"]/average_area)
+        largest_parkings["capacity"] = largest_parkings["capacity"].astype(int)
+    else:
+        largest_parkings["capacity"] = largest_parkings["area"]/average_area
+        largest_parkings["capacity"] = largest_parkings["capacity"].astype(int)
+    if "access" in gdf.columns:
+        # set NaN values in access attribute to unknown
+        largest_parkings["access"] = largest_parkings["access"].fillna("onbekend")
     # transform area to string
     largest_parkings["area"] = largest_parkings["area"].round().astype(str)
     # add m² to geodataframe area column
@@ -282,25 +287,28 @@ def main():
     isodistance_result = create_isodistance(lkp_dic)
     # get the bounding box in the correct format for overpass query
     bbox = get_bbox(isodistance_result)
-    # query overpass for parking locations
-    largest_parkings = get_parking(bbox)
-    # convert geodataframe to json
-    json = convert_to_geojson(largest_parkings)
-    # add download button to download CP suggestions
-    st.download_button(
-                        label="Download mogelijke CP locaties als JSON",
-                        data=json,
-                        file_name='cp_selection_parking.json'
-                        )
-    #Call the display_map function by passing coordinates, dataframe and geoJSON file    
-    st.text("")
-    # build and add map html to streamlit app
-    display_map(
-                lkp_dic, 
-                isodistance_result, 
-                largest_parkings
+    try:
+        # query overpass for parking locations
+        largest_parkings = get_parking(bbox)
+        # convert geodataframe to json
+        json = convert_to_geojson(largest_parkings)
+        # add download button to download CP suggestions
+        st.download_button(
+                            label="Download mogelijke CP locaties als JSON",
+                            data=json,
+                            file_name='cp_selection_parking.json'
+                            )
+        #Call the display_map function by passing coordinates, dataframe and geoJSON file    
+        st.text("")
+        # build and add map html to streamlit app
+        display_map(
+                    lkp_dic, 
+                    isodistance_result, 
+                    largest_parkings
                 )
-    st.text("")
+        st.text("")
+    except:
+        st.error("Geen geschikte CP locaties kunnen vinden (geen parking surfaces gevonden).")
 
 if __name__ == "__main__":
     main()
